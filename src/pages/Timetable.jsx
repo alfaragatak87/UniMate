@@ -6,13 +6,13 @@ import html2pdf from 'html2pdf.js';
 import Modal from '../components/Modal';
 
 export default function Timetable() {
-  const { semesters, academicPhase } = useAppContext();
+  const { semesters, setSemesters, academicPhase } = useAppContext();
   const isHoliday = academicPhase === 'libur';
   const navigate = useNavigate();
 
   // Filter only current active semester courses
   const currentSemester = semesters.find(s => s.status === 'current');
-  const allCourses = currentSemester ? currentSemester.courses.filter(c => typeof c === 'object') : [];
+  const allCourses = currentSemester && Array.isArray(currentSemester.courses) ? currentSemester.courses.filter(c => typeof c === 'object') : [];
 
   const [isPrintMode, setIsPrintMode] = useState(false);
   const [printConfig, setPrintConfig] = useState({

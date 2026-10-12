@@ -47,7 +47,7 @@ export default function Dashboard() {
   const activeSemesters = semesters.filter(s => s.status === 'current');
   let activeCourses = [];
   activeSemesters.forEach(s => {
-    activeCourses = [...activeCourses, ...s.courses];
+    activeCourses = [...activeCourses, ...(s.courses || [])];
   });
 
   // Calculate days until next semester if on holiday

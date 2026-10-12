@@ -4,6 +4,11 @@ const path = require('path');
 let mainWindow;
 
 function createWindow() {
+  const isDev = !app.isPackaged && process.env.NODE_ENV !== 'production';
+  const iconPath = isDev 
+    ? path.join(__dirname, '../public/favicon.svg') 
+    : path.join(__dirname, '../dist/favicon.svg');
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -16,11 +21,8 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
-    icon: path.join(__dirname, '../public/favicon.svg')
+    icon: iconPath
   });
-
-  // In dev mode, wait-on ensures this URL is ready
-  const isDev = !app.isPackaged && process.env.NODE_ENV !== 'production';
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000');

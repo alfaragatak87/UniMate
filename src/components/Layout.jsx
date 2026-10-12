@@ -135,7 +135,7 @@ export default function Layout() {
           <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
             <div style={{ display: 'flex', flexDirection: isSidebarCollapsed ? 'column' : 'row', alignItems: 'center', justifyContent: isSidebarCollapsed ? 'center' : 'space-between', gap: isSidebarCollapsed ? '1rem' : '0', marginBottom: '2.5rem' }}>
               <Link to="/" className="sidebar-logo" style={{ textDecoration: 'none', color: 'inherit', margin: 0, paddingLeft: isSidebarCollapsed ? '0' : '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <img src="/favicon.svg" alt="UniMate Logo" style={{ width: '32px', height: '32px', objectFit: 'contain' }} />
+                <img src="./favicon.svg" alt="UniMate Logo" style={{ width: '32px', height: '32px', objectFit: 'contain' }} />
                 {!isSidebarCollapsed && <span className="brand-text">UniMate</span>}
               </Link>
               <button 
@@ -232,7 +232,7 @@ export default function Layout() {
             <div className="top-header glass-header">
               <div className="topbar-left mobile-logo" style={{ alignItems: 'center', gap: '1rem' }}>
                 <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none', color: 'inherit' }}>
-                  <img src="/favicon.svg" alt="UniMate Logo" style={{ width: '28px', height: '28px', objectFit: 'contain' }} />
+                  <img src="./favicon.svg" alt="UniMate Logo" style={{ width: '28px', height: '28px', objectFit: 'contain' }} />
                   <span style={{ fontSize: '1.25rem', fontWeight: 900, background: 'linear-gradient(135deg, var(--primary-color) 0%, #a855f7 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>UniMate</span>
                 </Link>
               </div>
