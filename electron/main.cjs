@@ -6,8 +6,8 @@ let mainWindow;
 function createWindow() {
   const isDev = !app.isPackaged && process.env.NODE_ENV !== 'production';
   const iconPath = isDev 
-    ? path.join(__dirname, '../public/favicon.svg') 
-    : path.join(__dirname, '../dist/favicon.svg');
+    ? path.join(__dirname, '../public/icon.ico') 
+    : path.join(__dirname, '../dist/icon.ico');
 
   mainWindow = new BrowserWindow({
     width: 1200,
