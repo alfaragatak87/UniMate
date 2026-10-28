@@ -672,19 +672,89 @@ body.widget-mode {
 /* Custom Titlebar for dragging the frameless window */
 .electron-titlebar {
   -webkit-app-region: drag;
-  height: 24px;
+  height: 32px;
   width: 100%;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
-  z-index: 9999;
+  right: 0;
+  z-index: 99999;
+  background-color: var(--card-bg);
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+  box-sizing: border-box;
 }
 
-.electron-titlebar button {
+.titlebar-drag-region {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding-left: 1rem;
+  height: 100%;
+  -webkit-app-region: drag;
+  cursor: default;
+}
+
+.titlebar-app-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.titlebar-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
   -webkit-app-region: no-drag;
+}
+
+.titlebar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  padding: 0;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-btn:hover {
+  background-color: rgba(148, 163, 184, 0.2);
+  color: var(--text-main);
+}
+
+body.dark .titlebar-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.titlebar-btn-close:hover {
+  background-color: #e81123 !important;
+  color: #ffffff !important;
+}
+
+.titlebar-btn:active {
+  opacity: 0.75;
+}
+
+/* Mode widget compact titlebar */
+.widget-mode .electron-titlebar {
+  background: transparent !important;
+  border-bottom: none !important;
+  height: 24px;
+}
+
+.widget-mode .titlebar-drag-region {
+  display: none;
 }
 
 /* --- GLASSMORPHISM WIDGET STYLES --- */
@@ -2030,6 +2100,24 @@ body.dark .kanban-column {
   background: var(--bg-color);
 }
 
+.ai-chat-model-settings {
+  border-top: 1px solid var(--border-color);
+  background: var(--card-bg);
+}
+
+.ai-chat-model-settings > summary {
+  padding: 0.55rem 1rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.ai-chat-model-settings[open] {
+  max-height: 58%;
+  overflow-y: auto;
+}
+
 .ai-message {
   max-width: 85%;
   padding: 0.75rem 1rem;
@@ -2384,4 +2472,30 @@ body.dark select.form-input option {
   .timetable-grid {
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   }
-}
+}
+
+/* Thesis Workspace Responsive 3-Column Grid (B12 Final Polish) */
+.thesis-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(380px, 1fr) minmax(260px, 320px);
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+@media (max-width: 1366px) {
+  .thesis-workspace-grid {
+    grid-template-columns: minmax(190px, 220px) minmax(360px, 1fr) minmax(250px, 290px);
+    gap: 0.75rem;
+  }
+  .thesis-reader-panel {
+    padding: 1.15rem !important;
+  }
+}
+
+@media (max-width: 1080px) {
+  .thesis-workspace-grid {
+    grid-template-columns: 200px 1fr;
+  }
+}

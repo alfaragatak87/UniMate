@@ -1,35 +1,35 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { createLocalStorageController } from '../services/storageSafety';
 
-export function useLocalStorage(key, initialValue) {
-  // State to store our value
-  // Pass initial state function to useState so logic is only executed once
-  const [storedValue, setStoredValue] = useState(() => {
-    if (typeof window === "undefined") {
-      return initialValue;
-    }
-    try {
-      const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
-    } catch (error) {
-      console.warn(`Error reading localStorage key "${key}":`, error);
-      return initialValue;
-    }
-  });
-
-  // Return a wrapped version of useState's setter function that ...
-  // ... persists the new value to localStorage.
-  const setValue = (value) => {
-    try {
-      // Allow value to be a function so we have same API as useState
-      const valueToStore = value instanceof Function ? value(storedValue) : value;
-      setStoredValue(valueToStore);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(key, JSON.stringify(valueToStore));
+export function useLocalStorage(key, initialValue, options = {}) {
+  const controllerRef = useRef(null);
+  if (controllerRef.current === null) {
+    let storage = null;
+    if (typeof window !== 'undefined') {
+      try {
+        storage = window.localStorage;
+      } catch {
+        storage = null;
       }
-    } catch (error) {
-      console.warn(`Error setting localStorage key "${key}":`, error);
     }
-  };
+    controllerRef.current = createLocalStorageController({
+      storage,
+      key,
+      initialValue,
+      validate: options.validate,
+    });
+  }
 
-  return [storedValue, setValue];
+  const initialSnapshot = controllerRef.current.getSnapshot();
+  const [storedValue, setStoredValue] = useState(initialSnapshot.value);
+  const [storageStatus, setStorageStatus] = useState(initialSnapshot);
+
+  const setValue = useCallback((value) => {
+    const result = controllerRef.current.update(value);
+    setStorageStatus(result.snapshot);
+    if (result.ok) setStoredValue(result.value);
+    return result;
+  }, []);
+
+  return [storedValue, setValue, storageStatus];
 }

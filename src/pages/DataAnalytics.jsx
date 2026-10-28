@@ -11,8 +11,9 @@ import {
 } from 'recharts';
 import { Upload, Sparkles, Loader2, FileText, BarChart3 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAppContext } from '../context/AppContext';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { parseSafeMarkdown } from '../utils/safeMarkdown';
+import { formatAIProviderStatus, frontendAIClient } from '../services/aiClient';
+import AIModelSelector, { useAISelection } from '../components/AIModelSelector';
 
 export default function DataAnalytics() {
   const [data, setData] = useState([]);
@@ -25,9 +26,10 @@ export default function DataAnalytics() {
   const [recommendedChart, setRecommendedChart] = useState('');
   const [lineStyle, setLineStyle] = useState('monotone');
   
-  const { semesters, apiKey } = useAppContext();
   const [aiInsight, setAiInsight] = useState('');
+  const [aiProviderStatus, setAiProviderStatus] = useState('');
   const [isGeneratingInsight, setIsGeneratingInsight] = useState(false);
+  const { selection, setSelection, preferenceStatus } = useAISelection();
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -36,6 +38,7 @@ export default function DataAnalytics() {
     
     // Reset AI Insight when uploading new file
     setAiInsight('');
+    setAiProviderStatus('');
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -106,14 +109,11 @@ export default function DataAnalytics() {
   };
 
   const generateAIInsight = async () => {
-    if (!apiKey) {
-      toast.error('API Key Gemini belum diatur! Silakan isi di menu Settings.');
-      return;
-    }
     if (data.length === 0) return;
 
     setIsGeneratingInsight(true);
     setAiInsight('');
+    setAiProviderStatus('');
 
     // Fallback logic in case API fails
     const fallbackInsight = () => {
@@ -138,31 +138,27 @@ export default function DataAnalytics() {
       return `*(Kesimpulan Otomatis Offline)*\n\n${insights.join('\n')}`;
     };
 
-    try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-      
-      // Ambil sampel data (maks 50 baris untuk hemat token)
-      const sampleData = data.slice(0, 50);
-      const dataString = JSON.stringify(sampleData);
-      
-      const prompt = `Kamu adalah analis data ahli. 
-Berikut adalah sampel data CSV (maks 50 baris) dalam format JSON:
-${dataString}
-
-Sumbu X yang dipilih: ${xAxis}
-Sumbu Y yang ditampilkan: ${selectedYAxes.join(', ')}
-
-Tolong berikan ringkasan analitis singkat (maksimal 4 poin utama) dalam bahasa Indonesia mengenai tren, korelasi antar variabel, atau anomali dari Sumbu Y yang ditampilkan terhadap Sumbu X (${xAxis}). 
-Buat responsmu rapi menggunakan format markdown bullet points. Jangan terlalu panjang.`;
-
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      setAiInsight(response.text());
-    } catch (error) {
-      console.error('Gemini API Error:', error);
-      toast.error('API Key tidak valid atau koneksi gagal. Menggunakan analisis offline.');
+    if (!selection.freeTierDataConsent) {
       setAiInsight(fallbackInsight());
+      setAiProviderStatus('Analisis offline — data tidak dikirim ke provider AI');
+      setIsGeneratingInsight(false);
+      return;
+    }
+
+    try {
+      const response = await frontendAIClient.analyze({
+        rows: data.slice(0, 50),
+        xAxis,
+        yAxes: selectedYAxes,
+        selection,
+      });
+      if (!response.success) throw new Error('safe_ai_failure');
+      setAiInsight(response.result.markdown);
+      setAiProviderStatus(formatAIProviderStatus(response.meta));
+    } catch {
+      toast.error('Layanan AI lokal tidak tersedia. Menggunakan analisis offline.');
+      setAiInsight(fallbackInsight());
+      setAiProviderStatus('Analisis offline');
     } finally {
       setIsGeneratingInsight(false);
     }
@@ -170,20 +166,28 @@ Buat responsmu rapi menggunakan format markdown bullet points. Jangan terlalu pa
 
   const renderMarkdown = (text) => {
     if (!text) return null;
-    let html = text
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/^[-*]\s+(.*)$/gm, '<li style="margin-left: 1.5rem; margin-bottom: 0.5rem;">$1</li>');
-      
-    html = html.split('\n').map(line => {
-      if (line.trim() === '') return '';
-      if (!line.trim().startsWith('<li')) {
-        return `<p style="margin-bottom: 0.5rem">${line}</p>`;
-      }
-      return line;
-    }).join('');
-    
-    return <div dangerouslySetInnerHTML={{ __html: html }} />;
+    const renderSegments = (segments, blockIndex) => segments.map((segment, segmentIndex) => {
+      const key = `${blockIndex}-${segmentIndex}`;
+      if (segment.type === 'strong') return <strong key={key}>{segment.text}</strong>;
+      if (segment.type === 'emphasis') return <em key={key}>{segment.text}</em>;
+      return <React.Fragment key={key}>{segment.text}</React.Fragment>;
+    });
+
+    return (
+      <div>
+        {parseSafeMarkdown(text).map((block, blockIndex) => {
+          if (block.type === 'spacing') return <div key={blockIndex} style={{ height: '0.5rem' }} />;
+          if (block.type === 'bullet') {
+            return (
+              <div key={blockIndex} style={{ marginLeft: '1.5rem', marginBottom: '0.5rem' }}>
+                • {renderSegments(block.segments, blockIndex)}
+              </div>
+            );
+          }
+          return <p key={blockIndex} style={{ marginBottom: '0.5rem' }}>{renderSegments(block.segments, blockIndex)}</p>;
+        })}
+      </div>
+    );
   };
 
   return (
@@ -330,7 +334,15 @@ Buat responsmu rapi menggunakan format markdown bullet points. Jangan terlalu pa
               </div>
             )}
 
-            <div style={{ marginTop: '2rem' }}>
+            <div style={{ marginTop: '2rem', display: 'grid', gap: '1rem' }}>
+              <AIModelSelector
+                capability="analytics"
+                input={{ rows: data.slice(0, 50), xAxis, yAxes: selectedYAxes }}
+                selection={selection}
+                onChange={setSelection}
+                preferenceStatus={preferenceStatus}
+                requireConsent
+              />
               <button 
                 className="btn btn-primary" 
                 style={{ width: '100%', background: 'linear-gradient(135deg, var(--primary-color), #8b5cf6)', border: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }}
@@ -338,7 +350,9 @@ Buat responsmu rapi menggunakan format markdown bullet points. Jangan terlalu pa
                 disabled={isGeneratingInsight}
               >
                 {isGeneratingInsight ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                {isGeneratingInsight ? 'Menganalisis...' : 'Analisis dengan AI'}
+                {isGeneratingInsight
+                  ? 'Menganalisis...'
+                  : selection.freeTierDataConsent ? 'Analisis dengan AI' : 'Analisis Offline'}
               </button>
             </div>
           </div>
@@ -661,6 +675,9 @@ Buat responsmu rapi menggunakan format markdown bullet points. Jangan terlalu pa
                 <div style={{ lineHeight: '1.6', fontSize: '0.95rem', color: 'var(--text-main)' }}>
                   {renderMarkdown(aiInsight)}
                 </div>
+                {aiProviderStatus && (
+                  <small style={{ display: 'block', marginTop: '0.75rem', color: 'var(--text-muted)' }}>{aiProviderStatus}</small>
+                )}
               </div>
             )}
           </div>

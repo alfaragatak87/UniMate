@@ -23,6 +23,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<Dashboard />} />
+            <Route path="dashboard" element={<Dashboard />} />
             <Route path="semesters" element={<Semesters />} />
             <Route path="timetable" element={<Timetable />} />
             <Route path="tasks" element={<Tasks />} />
@@ -33,6 +34,7 @@ function App() {
             <Route path="sync" element={<DeviceSync />} />
             <Route path="settings" element={<Settings />} />
             <Route path="profile" element={<Profile />} />
+            <Route path="*" element={<Dashboard />} />
           </Route>
         </Routes>
       </AppProvider>

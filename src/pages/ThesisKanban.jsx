@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Plus, Trash2, GraduationCap } from 'lucide-react';
+import { Plus, Trash2, GraduationCap, BookOpen, LayoutDashboard } from 'lucide-react';
 import { DndContext, useDraggable, useDroppable } from '@dnd-kit/core';
 import toast from 'react-hot-toast';
 import Modal from '../components/Modal';
+import ConfirmDialog from '../components/ConfirmDialog';
+import ThesisWorkspace from '../components/ThesisWorkspace';
 
 // --- Komponen DND Helper ---
 function DroppableColumn({ id, title, count, color, children }) {
@@ -59,13 +61,6 @@ function DraggableCard({ task, color, onDelete }) {
 }
 // ----------------------------
 
-const initialKanban = {
-  todo: [{ id: 't1', title: 'Bab 1: Pendahuluan', desc: 'Mencari latar belakang masalah.' }],
-  inProgress: [{ id: 't2', title: 'Studi Literatur', desc: 'Membaca 5 jurnal rujukan utama.' }],
-  review: [],
-  done: []
-};
-
 const COLUMNS = [
   { id: 'todo', title: 'To Do', color: 'text-main' },
   { id: 'inProgress', title: 'In Progress', color: 'primary-color' },
@@ -76,8 +71,10 @@ const COLUMNS = [
 export default function ThesisKanban() {
   const { thesis: board, setThesis: setBoard } = useAppContext();
   
+  const [activeView, setActiveView] = useState('kanban'); // 'kanban' | 'workspace'
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState({ title: '', desc: '', status: 'todo' });
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const handleDragEnd = (event) => {
     const { active, over } = event;
@@ -119,23 +116,26 @@ export default function ThesisKanban() {
   };
 
   const handleDelete = (taskId) => {
-    if (window.confirm('Hapus task ini?')) {
-      setBoard(prev => {
-        const newBoard = { ...prev };
-        for (const col of COLUMNS) {
-          newBoard[col.id] = newBoard[col.id].filter(t => t.id !== taskId);
-        }
-        return newBoard;
-      });
-      toast.success('Dihapus!');
-    }
+    setConfirmDeleteId(taskId);
+  };
+
+  const doDelete = () => {
+    setBoard(prev => {
+      const newBoard = { ...prev };
+      for (const col of COLUMNS) {
+        newBoard[col.id] = newBoard[col.id].filter(t => t.id !== confirmDeleteId);
+      }
+      return newBoard;
+    });
+    toast.success('Dihapus!');
+    setConfirmDeleteId(null);
   };
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div className="page-header flex-between" style={{ 
         display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-        marginBottom: '2rem'
+        marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <div style={{
@@ -150,25 +150,77 @@ export default function ThesisKanban() {
           </div>
           <div>
             <h1 className="page-title" style={{ marginBottom: '0.25rem', lineHeight: 1 }}>Thesis Tracker</h1>
-            <p className="page-subtitle" style={{ margin: 0 }}>Tarik dan lepas (Drag & Drop) kartu skripsi Anda.</p>
+            <p className="page-subtitle" style={{ margin: 0 }}>
+              {activeView === 'kanban' ? 'Tarik dan lepas kartu skripsi Anda.' : 'Baca draf skripsi, buat catatan bimbingan, dan lacak riwayat revisi.'}
+            </p>
           </div>
         </div>
-        <button className="btn btn-primary" onClick={() => setIsModalOpen(true)}>
-          <Plus size={18} /> Tambah Task
-        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              background: 'var(--card-bg)',
+              padding: '0.25rem',
+              borderRadius: '10px',
+              border: '1px solid var(--border-color)',
+            }}
+          >
+            <button
+              type="button"
+              className={`btn ${activeView === 'kanban' ? 'btn-primary' : 'btn-ghost'}`}
+              style={{
+                padding: '0.4rem 0.85rem',
+                fontSize: '0.82rem',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+              }}
+              onClick={() => setActiveView('kanban')}
+            >
+              <LayoutDashboard size={15} /> Papan Kanban
+            </button>
+            <button
+              type="button"
+              className={`btn ${activeView === 'workspace' ? 'btn-primary' : 'btn-ghost'}`}
+              style={{
+                padding: '0.4rem 0.85rem',
+                fontSize: '0.82rem',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+              }}
+              onClick={() => setActiveView('workspace')}
+            >
+              <BookOpen size={15} /> Workspace Dokumen &amp; Revisi
+            </button>
+          </div>
+
+          {activeView === 'kanban' && (
+            <button className="btn btn-primary" onClick={() => setIsModalOpen(true)}>
+              <Plus size={18} /> Tambah Task
+            </button>
+          )}
+        </div>
       </div>
 
-      <DndContext onDragEnd={handleDragEnd}>
-        <div className="kanban-board">
-          {COLUMNS.map(col => (
-            <DroppableColumn key={col.id} id={col.id} title={col.title} color={col.color} count={board[col.id]?.length || 0}>
-              {board[col.id]?.map(task => (
-                <DraggableCard key={task.id} task={task} color={col.color} onDelete={handleDelete} />
-              ))}
-            </DroppableColumn>
-          ))}
-        </div>
-      </DndContext>
+      {activeView === 'kanban' ? (
+        <DndContext onDragEnd={handleDragEnd}>
+          <div className="kanban-board">
+            {COLUMNS.map(col => (
+              <DroppableColumn key={col.id} id={col.id} title={col.title} color={col.color} count={board[col.id]?.length || 0}>
+                {board[col.id]?.map(task => (
+                  <DraggableCard key={task.id} task={task} color={col.color} onDelete={handleDelete} />
+                ))}
+              </DroppableColumn>
+            ))}
+          </div>
+        </DndContext>
+      ) : (
+        <ThesisWorkspace />
+      )}
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Tambah Task Skripsi">
         <form onSubmit={handleSave}>
@@ -192,6 +244,17 @@ export default function ThesisKanban() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={!!confirmDeleteId}
+        title="Hapus Task Skripsi"
+        message="Yakin ingin menghapus task ini dari papan skripsi?"
+        confirmText="Ya, Hapus"
+        cancelText="Batal"
+        confirmColor="#ef4444"
+        onConfirm={doDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }

@@ -107,5 +107,5 @@ Proyek ini dilisensikan di bawah lisensi **MIT License** - lihat berkas [LICENSE
 ---
 
 <div align="center">
-Dibuat dengan ❤️ oleh <b>Muhammad Alfatih</b>
+Dibuat  oleh <b>Muhammad Alfatih</b>
 </div>

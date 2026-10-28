@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
-import { Plus, Check, FileText, Trash2, Calendar, BookOpen, Clock, Paperclip, Eye, Users, Target, Download, Edit3, LayoutDashboard, Folder, ChevronRight, CheckSquare } from 'lucide-react';
+import { Plus, Check, FileText, Trash2, Calendar, BookOpen, Clock, Paperclip, Eye, Users, Target, Download, Edit3, LayoutDashboard, Folder, ChevronRight, CheckSquare, Copy } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Modal from '../components/Modal';
 import MonthlyCalendar from '../components/MonthlyCalendar';
+import { resolvePersistentDocument, hasPersistentDocumentText, resolvePersistentDocumentText } from '../services/persistentDocument';
+import { courseVaultBinaryStore } from '../services/binaryFileStore';
 
 export default function Tasks() {
   const location = useLocation();
@@ -59,15 +61,85 @@ export default function Tasks() {
     setIsModalOpen(false);
   };
 
-  const handleDownload = (item) => {
+  const closeFilePreview = () => {
+    viewFile?.release?.();
+    setViewFile(null);
+  };
+
+  useEffect(() => () => viewFile?.release?.(), [viewFile]);
+
+  const [previewTab, setPreviewTab] = useState('file');
+
+  const openFilePreview = async (item) => {
     if (!item.originalFile) return;
-    const a = document.createElement('a');
-    a.href = item.originalFile;
-    const ext = item.fileType === 'pdf' ? '.pdf' : item.fileType === 'image' ? '.png' : '';
-    a.download = (item.title || 'dokumen') + ext;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    try {
+      const resolved = await resolvePersistentDocument(item.originalFile);
+      let ocrRecord = null;
+      if (hasPersistentDocumentText(item)) {
+        try {
+          ocrRecord = await resolvePersistentDocumentText(item, { store: courseVaultBinaryStore });
+        } catch {
+          ocrRecord = null;
+        }
+      }
+      closeFilePreview();
+      setPreviewTab('file');
+      setViewFile({
+        title: item.title,
+        url: resolved.url,
+        type: item.fileType,
+        release: resolved.release,
+        ocrRecord,
+      });
+    } catch {
+      toast.error('Dokumen tidak tersedia atau referensinya rusak.');
+    }
+  };
+
+  const handleCopyOcr = async (text) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Teks OCR berhasil disalin ke clipboard.');
+    } catch {
+      toast.error('Gagal menyalin teks OCR.');
+    }
+  };
+
+  const handleDownloadOcr = (title, text) => {
+    if (!text) return;
+    try {
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const baseName = (title || 'dokumen').replace(/\.[^.]+$/, '');
+      a.href = url;
+      a.download = `${baseName}-ocr.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Teks OCR berhasil diunduh sebagai .txt');
+    } catch {
+      toast.error('Gagal mengunduh teks OCR.');
+    }
+  };
+
+  const handleDownload = async (item) => {
+    if (!item.originalFile) return;
+    let resolved;
+    try {
+      resolved = await resolvePersistentDocument(item.originalFile);
+      const a = document.createElement('a');
+      a.href = resolved.url;
+      const ext = item.fileType === 'pdf' ? '.pdf' : item.fileType === 'image' ? '.png' : '';
+      a.download = resolved.name || (item.title || 'dokumen') + ext;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch {
+      toast.error('Dokumen tidak dapat diunduh. Metadata tetap dipertahankan.');
+    } finally {
+      resolved?.release();
+    }
   };
 
   // Drag and Drop Handlers
@@ -308,7 +380,7 @@ export default function Tasks() {
                           <div style={{ display: 'flex', gap: '6px' }}>
                             {item.originalFile && (
                               <>
-                                <button className="btn-icon" onClick={() => setViewFile({title: item.title, url: item.originalFile, type: item.fileType})} style={{ padding: 0, color: 'var(--text-muted)' }} title="Lihat">
+                                <button className="btn-icon" onClick={() => void openFilePreview(item)} style={{ padding: 0, color: 'var(--text-muted)' }} title="Lihat">
                                   <Eye size={14} />
                                 </button>
                                 <button className="btn-icon" onClick={() => handleDownload(item)} style={{ padding: 0, color: 'var(--text-muted)' }} title="Unduh">
@@ -388,7 +460,7 @@ export default function Tasks() {
               <div style={{ flex: 1 }}>
                 <h4 
                   style={{ margin: '0 0 0.5rem 0', color: 'var(--text-main)', fontSize: '1.05rem', textDecoration: item.done ? 'line-through' : 'none', cursor: item.originalFile ? 'pointer' : 'default' }}
-                  onClick={() => item.originalFile && setViewFile({title: item.title, url: item.originalFile, type: item.fileType})}
+                  onClick={() => item.originalFile && void openFilePreview(item)}
                 >
                   {item.title}
                 </h4>
@@ -438,7 +510,7 @@ export default function Tasks() {
                 </div>
                 {item.originalFile && (
                   <button 
-                    onClick={() => setViewFile({title: item.title, url: item.originalFile, type: item.fileType})} 
+                    onClick={() => void openFilePreview(item)} 
                     className="btn btn-outline" 
                     style={{padding: '0.25rem 0.5rem', fontSize: '0.75rem', marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px'}}
                   >
@@ -507,21 +579,118 @@ export default function Tasks() {
         </form>
       </Modal>
 
-      <Modal isOpen={!!viewFile} onClose={() => setViewFile(null)} title={viewFile?.title || 'Dokumen'}>
-        <div style={{ width: '100%', height: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f5f9', borderRadius: '8px', overflow: 'hidden' }}>
-           {viewFile?.type === 'pdf' ? (
-              <iframe src={viewFile.url} width="100%" height="100%" style={{border: 'none'}} title="PDF Viewer" />
-           ) : viewFile?.type === 'image' ? (
-              <img src={viewFile.url} style={{maxWidth: '100%', maxHeight: '100%', objectFit: 'contain'}} alt="Pratinjau Dokumen" />
-           ) : (
-              <div style={{textAlign: 'center', color: 'var(--text-muted)'}}>
-                <FileText size={48} style={{margin: '0 auto 1rem'}} />
-                <p>Pratinjau visual tidak tersedia untuk format file ini.</p>
+      <Modal isOpen={!!viewFile} onClose={closeFilePreview} title={viewFile?.title || 'Dokumen'}>
+        {viewFile?.ocrRecord && (
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+            <button
+              type="button"
+              className={`btn ${previewTab === 'file' ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setPreviewTab('file')}
+              style={{ padding: '0.35rem 0.75rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+            >
+              <Paperclip size={15} /> Berkas Asli
+            </button>
+            <button
+              type="button"
+              className={`btn ${previewTab === 'ocr' ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setPreviewTab('ocr')}
+              style={{ padding: '0.35rem 0.75rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+            >
+              <FileText size={15} /> Teks Hasil OCR
+              {viewFile.ocrRecord.editedText !== null ? (
+                <span style={{ fontSize: '0.7rem', padding: '1px 5px', borderRadius: '4px', background: '#fef3c7', color: '#b45309', marginLeft: '4px' }}>Diedit</span>
+              ) : (
+                <span style={{ fontSize: '0.7rem', padding: '1px 5px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', marginLeft: '4px' }}>Mesin</span>
+              )}
+            </button>
+          </div>
+        )}
+
+        {previewTab === 'ocr' && viewFile?.ocrRecord ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '65vh' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', background: 'var(--bg-color)', padding: '0.6rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <span style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  padding: '0.2rem 0.5rem',
+                  borderRadius: '4px',
+                  backgroundColor: viewFile.ocrRecord.editedText !== null ? 'rgba(234, 179, 8, 0.15)' : 'rgba(34, 197, 94, 0.15)',
+                  color: viewFile.ocrRecord.editedText !== null ? '#ca8a04' : '#16a34a',
+                }}>
+                  {viewFile.ocrRecord.editedText !== null ? 'Telah Diedit Pengguna' : 'Sesuai Hasil OCR Mesin'}
+                </span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  {viewFile.ocrRecord.text.length.toLocaleString('id-ID')} karakter
+                </span>
+                {viewFile.ocrRecord.confidence !== null && viewFile.ocrRecord.confidence !== undefined && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    · Keyakinan: ~{Math.round(viewFile.ocrRecord.confidence)}%
+                  </span>
+                )}
               </div>
-           )}
-        </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <button
+                  type="button"
+                  onClick={() => handleCopyOcr(viewFile.ocrRecord.text)}
+                  className="btn btn-outline"
+                  style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                  title="Salin teks ke clipboard"
+                >
+                  <Copy size={13} /> Salin
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadOcr(viewFile.title, viewFile.ocrRecord.text)}
+                  className="btn btn-outline"
+                  style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                  title="Unduh teks sebagai .txt"
+                >
+                  <Download size={13} /> Unduh .txt
+                </button>
+              </div>
+            </div>
+
+            <textarea
+              readOnly
+              value={viewFile.ocrRecord.text}
+              style={{
+                width: '100%',
+                flex: 1,
+                padding: '0.75rem',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-color)',
+                color: 'var(--text-main)',
+                fontFamily: 'monospace',
+                fontSize: '0.85rem',
+                lineHeight: 1.5,
+                resize: 'none',
+              }}
+            />
+
+            {viewFile.ocrRecord.editedText !== null && (
+              <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                ℹ️ Teks asli mesin (rawText: {viewFile.ocrRecord.rawText.length} karakter) tetap tersimpan utuh di IndexedDB secara permanen.
+              </small>
+            )}
+          </div>
+        ) : (
+          <div style={{ width: '100%', height: '65vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f5f9', borderRadius: '8px', overflow: 'hidden' }}>
+             {viewFile?.type === 'pdf' ? (
+                <iframe src={viewFile.url} width="100%" height="100%" style={{border: 'none'}} title="PDF Viewer" />
+             ) : viewFile?.type === 'image' ? (
+                <img src={viewFile.url} style={{maxWidth: '100%', maxHeight: '100%', objectFit: 'contain'}} alt="Pratinjau Dokumen" />
+             ) : (
+                <div style={{textAlign: 'center', color: 'var(--text-muted)'}}>
+                  <FileText size={48} style={{margin: '0 auto 1rem'}} />
+                  <p>Pratinjau visual tidak tersedia untuk format file ini.</p>
+                </div>
+             )}
+          </div>
+        )}
         <div className="form-actions" style={{ marginTop: '1.5rem' }}>
-          <button className="btn btn-primary" onClick={() => setViewFile(null)}>Tutup</button>
+          <button className="btn btn-primary" onClick={closeFilePreview}>Tutup</button>
         </div>
       </Modal>
     </div>

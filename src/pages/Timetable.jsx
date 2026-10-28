@@ -21,22 +21,61 @@ export default function Timetable() {
     showRoom: true,
     showLecturer: true,
     showMode: true,
-    showFriday: false
+    showFriday: true
   });
   
   const [editingCourse, setEditingCourse] = useState(null);
 
-  const days = printConfig.showFriday ? ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'] : ['Senin', 'Selasa', 'Rabu', 'Kamis'];
+  // Periksa apakah terdapat mata kuliah di hari Jumat atau Sabtu
+  const hasFridayCourse = allCourses.some(c =>
+    (c.day && c.day.toLowerCase().includes('jumat')) ||
+    (Array.isArray(c.schedules) && c.schedules.some(s => s.day && s.day.toLowerCase().includes('jumat')))
+  );
+  const hasSaturdayCourse = allCourses.some(c =>
+    (c.day && c.day.toLowerCase().includes('sabtu')) ||
+    (Array.isArray(c.schedules) && c.schedules.some(s => s.day && s.day.toLowerCase().includes('sabtu')))
+  );
+
+  const baseDays = printConfig.showFriday || hasFridayCourse
+    ? ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat']
+    : ['Senin', 'Selasa', 'Rabu', 'Kamis'];
+  const days = hasSaturdayCourse ? [...baseDays, 'Sabtu'] : baseDays;
+
+  // Ekspansi item jadwal: mendukung seluruh sesi (teori & praktikum) dari course.schedules
+  const timetableSessions = allCourses.flatMap((course, cIdx) => {
+    if (Array.isArray(course.schedules) && course.schedules.length > 0) {
+      return course.schedules.map((sched, sIdx) => ({
+        ...course,
+        parentCourse: course,
+        day: sched.day || course.day,
+        timeStart: sched.timeStart || course.timeStart,
+        timeEnd: sched.timeEnd || course.timeEnd,
+        room: sched.room || course.room,
+        lecturer: sched.lecturer || course.lecturer,
+        class: sched.class || course.class,
+        sessionLabel: sched.label || (course.schedules.length > 1 ? (sIdx === 0 ? 'Teori' : 'Praktikum') : null),
+        _sessionKey: `${course.id || course.code || cIdx}_sched_${sIdx}`,
+      }));
+    }
+    return [{
+      ...course,
+      parentCourse: course,
+      sessionLabel: null,
+      _sessionKey: `${course.id || course.code || cIdx}_single`,
+    }];
+  });
   
-  // Create a mapping of days to courses
+  // Mapping hari ke sesi perkuliahan
   const scheduleByDay = days.reduce((acc, day) => {
-    acc[day] = allCourses
-      .filter(course => course.day && course.day.trim().toLowerCase().includes(day.toLowerCase()))
+    acc[day] = timetableSessions
+      .filter(s => s.day && s.day.trim().toLowerCase().includes(day.toLowerCase()))
       .sort((a, b) => (a.timeStart || '00:00').localeCompare(b.timeStart || '00:00'));
     return acc;
   }, {});
 
-  const unmappedCourses = allCourses.filter(course => !course.day || !days.some(d => course.day.trim().toLowerCase().includes(d.toLowerCase())));
+  const unmappedCourses = timetableSessions.filter(
+    s => !s.day || !days.some(d => s.day.trim().toLowerCase().includes(d.toLowerCase()))
+  );
 
   const handleExportPDF = () => {
     const element = document.getElementById('timetable-content');
@@ -65,8 +104,8 @@ export default function Timetable() {
     setEditingCourse(null);
   };
 
-  const colors = ['#eff6ff', '#f0fdf4', '#fdf2f8', '#fffbeb', '#f5f3ff'];
-  const borderColors = ['#3b82f6', '#22c55e', '#ec4899', '#f59e0b', '#8b5cf6'];
+  const colors = ['#eff6ff', '#f0fdf4', '#fdf2f8', '#fffbeb', '#f5f3ff', '#fef2f2', '#f0fdfa'];
+  const borderColors = ['#3b82f6', '#22c55e', '#ec4899', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6'];
 
   return (
     <div>
@@ -91,7 +130,7 @@ export default function Timetable() {
               <p style={{ color: 'var(--text-secondary)' }}>
                 {isHoliday 
                   ? 'Nikmati waktu libur Anda! Tidak ada kelas saat ini.' 
-                  : `Jadwal kelas aktif untuk ${currentSemester ? currentSemester.name : 'Semester Saat Ini'}. (Total: ${allCourses.length} kelas)`
+                  : `Jadwal kelas aktif untuk ${currentSemester ? currentSemester.name : 'Semester Saat Ini'}. (Total: ${allCourses.length} mata kuliah • ${timetableSessions.length} sesi pertemuan)`
                 }
               </p>
             </div>
@@ -179,12 +218,12 @@ export default function Timetable() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1 }}>
               {scheduleByDay[day] && scheduleByDay[day].length > 0 ? (
                 scheduleByDay[day].map((course, cIdx) => (
-                  <div 
-                    key={course.id || cIdx} 
+                  <div
+                    key={course._sessionKey || course.id || cIdx}
                     className="timetable-course-card"
                     style={{
-                      backgroundColor: colors[idx],
-                      borderLeft: `4px solid ${borderColors[idx]}`,
+                      backgroundColor: colors[idx % colors.length],
+                      borderLeft: `4px solid ${borderColors[idx % borderColors.length]}`,
                       padding: '0.75rem',
                       borderRadius: '0 8px 8px 0',
                       fontSize: '0.9rem',
@@ -192,15 +231,30 @@ export default function Timetable() {
                       cursor: 'pointer',
                       transition: 'transform 0.2s, box-shadow 0.2s'
                     }}
-                    onClick={() => setEditingCourse(course)}
+                    onClick={() => setEditingCourse(course.parentCourse || course)}
                     onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.05)'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}
                     title="Klik untuk mengedit"
                   >
-                    <div style={{ position: 'absolute', top: '0.75rem', right: '0.75rem', color: borderColors[idx], opacity: 0.7 }}>
+                    <div style={{ position: 'absolute', top: '0.75rem', right: '0.75rem', color: borderColors[idx % borderColors.length], opacity: 0.7 }}>
                       <Edit3 size={14} />
                     </div>
-                    <h4 style={{ margin: '0 0 0.25rem 0', color: 'var(--text-main)', fontSize: '1rem', paddingRight: '1rem' }}>{course.name}</h4>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.25rem', paddingRight: '1rem' }}>
+                      <h4 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1rem' }}>{course.name}</h4>
+                      {course.sessionLabel && (
+                        <span style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          background: 'rgba(99, 102, 241, 0.12)',
+                          color: 'var(--primary-color)',
+                          border: '1px solid rgba(99, 102, 241, 0.25)',
+                        }}>
+                          {course.sessionLabel}
+                        </span>
+                      )}
+                    </div>
                     {printConfig.showTime && course.timeStart && (
                       <p style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <Clock size={12}/> {course.timeStart} - {course.timeEnd}

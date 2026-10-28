@@ -1,0 +1,18 @@
+UniMate Offline Scanner third-party runtime assets
+
+PDF.js / pdfjs-dist 6.4.299
+Copyright Mozilla Foundation and contributors
+License: Apache-2.0
+License text: licenses/LICENSE-pdfjs.txt
+
+Tesseract.js 7.0.0 and tesseract.js-core 7.0.0
+Copyright Tesseract.js contributors
+License: Apache-2.0
+License text: licenses/LICENSE-tesseract.txt
+
+English trained data: @tesseract.js-data/eng 1.0.0
+Indonesian trained data: @tesseract.js-data/ind 1.0.0
+License declared by both npm packages: MIT
+
+Only the local LSTM runtime variants and best_int English/Indonesian models used by
+the Offline Scanner proof are included. Runtime use must not depend on a CDN.

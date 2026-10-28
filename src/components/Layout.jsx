@@ -10,7 +10,20 @@ import AIChatWidget from './AIChatWidget';
 export default function Layout() {
   const { semesterProfile: semester, semesters, academicPhase, isSidebarCollapsed, setIsSidebarCollapsed, isDarkMode, setIsDarkMode } = useAppContext();
   const [isWidget, setIsWidget] = useState(false);
-  const isElectron = window.electronAPI !== undefined;
+  const [isMaximized, setIsMaximized] = useState(false);
+  const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
+
+  useEffect(() => {
+    if (isElectron && typeof window.electronAPI?.onMaximizedChange === 'function') {
+      const unsubscribe = window.electronAPI.onMaximizedChange((maximized) => {
+        setIsMaximized(maximized);
+      });
+      if (typeof window.electronAPI?.isWindowMaximized === 'function') {
+        window.electronAPI.isWindowMaximized().then(setIsMaximized).catch(() => {});
+      }
+      return unsubscribe;
+    }
+  }, [isElectron]);
 
   // Pull to refresh state
   const [pullStart, setPullStart] = useState(null);
@@ -107,24 +120,56 @@ export default function Layout() {
     <div className="app-layout">
       {/* Custom Titlebar for Electron Frameless Window */}
       {isElectron && (
-        <div className="electron-titlebar">
-          <button className="btn-icon" onClick={toggleWidgetMode} title={isWidget ? "Kembali ke Mode Penuh" : "Mode Widget Desktop"} style={{ color: isWidget ? 'white' : 'var(--text-muted)' }}>
-            {isWidget ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
-          </button>
-          {!isWidget && (
-            <>
-              <button className="btn-icon" onClick={handleMinimize}>
-                <Minus size={16} />
-              </button>
-              <button className="btn-icon" onClick={handleToggleMaximize}>
-                <Square size={14} />
-              </button>
-              <button className="btn-icon btn-icon-danger" onClick={handleClose}>
-                <X size={16} />
-              </button>
-            </>
-          )}
-        </div>
+        <header className="electron-titlebar" aria-label="Kontrol Jendela">
+          <div className="titlebar-drag-region" onDoubleClick={handleToggleMaximize}>
+            <span className="titlebar-app-title">UniMate</span>
+          </div>
+          <div className="titlebar-controls">
+            <button 
+              className="titlebar-btn titlebar-btn-widget" 
+              onClick={toggleWidgetMode} 
+              title={isWidget ? "Kembali ke Mode Penuh" : "Mode Widget Desktop"}
+              aria-label={isWidget ? "Kembali ke Mode Penuh" : "Mode Widget Desktop"}
+            >
+              {isWidget ? <Maximize2 size={13} /> : <Minimize2 size={13} />}
+            </button>
+            {!isWidget && (
+              <>
+                <button 
+                  className="titlebar-btn titlebar-btn-minimize" 
+                  onClick={handleMinimize} 
+                  title="Minimize"
+                  aria-label="Minimize"
+                >
+                  <Minus size={14} />
+                </button>
+                <button 
+                  className="titlebar-btn titlebar-btn-maximize" 
+                  onClick={handleToggleMaximize} 
+                  title={isMaximized ? "Restore" : "Maximize"}
+                  aria-label={isMaximized ? "Restore" : "Maximize"}
+                >
+                  {isMaximized ? (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                      <rect x="2.5" y="0.5" width="8" height="8" rx="1" />
+                      <path d="M0.5 3.5V10.5C0.5 11.0523 0.947715 11.5 1.5 11.5H8.5" />
+                    </svg>
+                  ) : (
+                    <Square size={12} strokeWidth={1.8} />
+                  )}
+                </button>
+                <button 
+                  className="titlebar-btn titlebar-btn-close" 
+                  onClick={handleClose} 
+                  title="Close"
+                  aria-label="Close"
+                >
+                  <X size={14} />
+                </button>
+              </>
+            )}
+          </div>
+        </header>
       )}
 
       {isWidget ? (
@@ -132,7 +177,13 @@ export default function Layout() {
       ) : (
         <>
           {/* Sidebar */}
-          <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+          <aside 
+            className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}
+            style={{ 
+              marginTop: isElectron && !isWidget ? '32px' : '0', 
+              height: isElectron && !isWidget ? 'calc(100vh - 32px)' : '100vh' 
+            }}
+          >
             <div style={{ display: 'flex', flexDirection: isSidebarCollapsed ? 'column' : 'row', alignItems: 'center', justifyContent: isSidebarCollapsed ? 'center' : 'space-between', gap: isSidebarCollapsed ? '1rem' : '0', marginBottom: '2.5rem' }}>
               <Link to="/" className="sidebar-logo" style={{ textDecoration: 'none', color: 'inherit', margin: 0, paddingLeft: isSidebarCollapsed ? '0' : '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <img src="./favicon.svg" alt="UniMate Logo" style={{ width: '32px', height: '32px', objectFit: 'contain' }} />
@@ -195,7 +246,11 @@ export default function Layout() {
           {/* Main Content Area */}
           <main 
             className="main-content" 
-            style={{ marginTop: isElectron ? '24px' : '0', position: 'relative' }}
+            style={{ 
+              marginTop: isElectron && !isWidget ? '32px' : '0', 
+              height: isElectron && !isWidget ? 'calc(100vh - 32px)' : '100vh',
+              position: 'relative' 
+            }}
             ref={mainContentRef}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}

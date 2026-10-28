@@ -1,15 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
-import { useAppContext } from '../context/AppContext';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { MessageSquare, X, Send, Sparkles, Loader2 } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { formatAIProviderStatus, frontendAIClient } from '../services/aiClient';
+import AIModelSelector, { useAISelection } from './AIModelSelector';
 
 export default function AIChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
-  const { apiKey } = useAppContext();
   const [messages, setMessages] = useState([{ role: 'bot', text: 'Halo! Aku asisten AI UniMate. Ada tugas atau ide proyek yang ingin didiskusikan hari ini? 💡' }]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { selection, setSelection, preferenceStatus } = useAISelection();
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -24,32 +23,24 @@ export default function AIChatWidget() {
     e?.preventDefault();
     if (!input.trim()) return;
 
-    if (!apiKey) {
-      toast.error('API Key Gemini belum diatur! Silakan atur di Settings.');
-      return;
-    }
-
     const userMessage = input.trim();
     setInput('');
     setMessages(prev => [...prev, { role: 'user', text: userMessage }]);
     setIsLoading(true);
 
     try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-      
-      const prompt = `Kamu adalah asisten AI yang cerdas, ramah, dan membantu khusus untuk aplikasi manajemen kuliah "UniMate". 
-Berikan respons yang ringkas dan memotivasi untuk pertanyaan berikut:
-${userMessage}`;
-
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-
-      setMessages(prev => [...prev, { role: 'bot', text }]);
-    } catch (error) {
-      console.error(error);
-      setMessages(prev => [...prev, { role: 'bot', text: 'Maaf, terjadi kesalahan saat menyambung ke server AI. Pastikan API Key Anda valid dan koneksi internet stabil.' }]);
+      const response = await frontendAIClient.chat({ message: userMessage, selection });
+      if (!response.success) {
+        setMessages(prev => [...prev, { role: 'bot', text: 'Maaf, layanan AI belum dapat menyelesaikan permintaan ini.' }]);
+      } else {
+        setMessages(prev => [...prev, {
+          role: 'bot',
+          text: response.result.message,
+          providerStatus: formatAIProviderStatus(response.meta),
+        }]);
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: 'bot', text: 'Maaf, layanan AI lokal belum tersedia. Fitur lain UniMate tetap dapat digunakan.' }]);
     } finally {
       setIsLoading(false);
     }
@@ -63,7 +54,7 @@ ${userMessage}`;
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Sparkles size={18} /> UniMate AI
             </div>
-            <button onClick={() => setIsOpen(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+            <button aria-label="Tutup UniMate AI" onClick={() => setIsOpen(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
               <X size={18} />
             </button>
           </div>
@@ -72,6 +63,9 @@ ${userMessage}`;
             {messages.map((msg, idx) => (
               <div key={idx} className={`ai-message ${msg.role}`}>
                 {msg.text}
+                {msg.providerStatus && (
+                  <small style={{ display: 'block', marginTop: '0.4rem', opacity: 0.7 }}>{msg.providerStatus}</small>
+                )}
               </div>
             ))}
             {isLoading && (
@@ -82,6 +76,19 @@ ${userMessage}`;
             <div ref={messagesEndRef} />
           </div>
 
+          <details className="ai-chat-model-settings">
+            <summary>Model AI dan privasi</summary>
+            <AIModelSelector
+              capability="chat"
+              input={{ message: input }}
+              selection={selection}
+              onChange={setSelection}
+              preferenceStatus={preferenceStatus}
+              compact
+              requireConsent
+            />
+          </details>
+
           <form className="ai-chat-input-area" onSubmit={handleSend}>
             <input 
               type="text" 
@@ -90,7 +97,13 @@ ${userMessage}`;
               onChange={e => setInput(e.target.value)}
               disabled={isLoading}
             />
-            <button type="submit" className="ai-chat-send" disabled={isLoading || !input.trim()}>
+            <button
+              type="submit"
+              className="ai-chat-send"
+              aria-label="Kirim pesan ke UniMate AI"
+              title={selection.freeTierDataConsent ? 'Kirim pesan' : 'Setujui privasi Free Tier terlebih dahulu'}
+              disabled={isLoading || !input.trim() || !selection.freeTierDataConsent}
+            >
               <Send size={16} />
             </button>
           </form>
@@ -98,7 +111,7 @@ ${userMessage}`;
       )}
 
       {!isOpen && (
-        <button className="ai-chat-button" onClick={() => setIsOpen(true)}>
+        <button className="ai-chat-button" aria-label="Buka UniMate AI" onClick={() => setIsOpen(true)}>
           <MessageSquare size={24} />
         </button>
       )}

@@ -1,0 +1,204 @@
+.ai-model-selector {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card-bg) 92%, var(--primary-color) 8%);
+  color: var(--text-main);
+}
+
+.ai-model-selector__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.ai-model-selector__heading > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.ai-model-selector__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--primary-color);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ai-model-selector__free-badge {
+  flex-shrink: 0;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ai-model-selector__fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ai-model-selector__fieldset legend,
+.ai-model-selector__field label {
+  margin-bottom: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.ai-model-selector__segmented,
+.ai-model-selector__complexity {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.ai-model-selector__segmented button,
+.ai-model-selector__complexity label {
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: var(--card-bg);
+  color: var(--text-main);
+}
+
+.ai-model-selector__segmented button {
+  padding: 0.55rem 0.65rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.ai-model-selector__segmented button.is-active,
+.ai-model-selector__complexity label.is-active {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 18%, transparent);
+}
+
+.ai-model-selector__complexity {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ai-model-selector__complexity label {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.55rem;
+  cursor: pointer;
+}
+
+.ai-model-selector__complexity label:has(input:disabled) {
+  cursor: default;
+}
+
+.ai-model-selector__complexity input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ai-model-selector__complexity span {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.ai-model-selector__complexity small {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.ai-model-selector__field {
+  display: grid;
+}
+
+.ai-model-selector__field select {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: var(--card-bg);
+  color: var(--text-main);
+}
+
+.ai-model-selector__reason,
+.ai-model-selector__quota {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.ai-model-selector__reason svg,
+.ai-model-selector__quota svg {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.ai-model-selector__quota.is-warning {
+  color: #b45309;
+}
+
+.ai-model-selector__privacy {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.ai-model-selector__consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  color: var(--text-main);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.ai-model-selector__consent input {
+  margin-top: 0.15rem;
+}
+
+.ai-model-selector--compact {
+  gap: 0.55rem;
+  padding: 0.7rem 0.8rem;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+.ai-model-selector--compact .ai-model-selector__heading strong {
+  font-size: 0.82rem;
+}
+
+.ai-model-selector--compact .ai-model-selector__privacy,
+.ai-model-selector--compact .ai-model-selector__quota {
+  font-size: 0.68rem;
+}
+
+@media (max-width: 560px) {
+  .ai-model-selector__heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ai-model-selector__free-badge {
+    align-self: flex-start;
+  }
+
+  .ai-model-selector__complexity {
+    grid-template-columns: 1fr;
+  }
+}

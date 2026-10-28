@@ -1,9 +1,20 @@
 import { useState, useEffect } from 'react';
 import Modal from './Modal';
-import { Clock, Calendar, MapPin, User, FileText, Upload, Trash2, Folder, ChevronRight, HardDrive, Search, Monitor, Plus, Users, Star, FileSpreadsheet, Presentation, FileCode, Image as ImageIcon, File, Menu, Minus, Maximize, RotateCw, Edit2, Undo, Redo, Download, Printer, MoreVertical, Copy, MoveRight, Link, Info, Lock, FolderUp } from 'lucide-react';
+import { Clock, Calendar, MapPin, User, FileText, Upload, Trash2, Folder, ChevronRight, Search, Plus, Star, FileSpreadsheet, FileCode, Image as ImageIcon, Menu, Minus, Maximize, RotateCw, RotateCcw, Edit2, Undo, Redo, Download, Printer, MoreVertical, Copy, MoveRight, Link, Info, Lock, FolderUp, Save, AlertCircle, Check, X } from 'lucide-react';
 import toast from 'react-hot-toast';
+import {
+  BINARY_FILE_ACCEPT,
+  courseVaultBinaryStore,
+  hasLegacyTransientBinary,
+  isBinaryFileReference,
+} from '../services/binaryFileStore';
+import {
+  hasPersistentDocumentText,
+  resolvePersistentDocumentText,
+  updatePersistentDocumentEditedText,
+} from '../services/persistentDocument';
 
-export default function CourseVaultModal({ isOpen, onClose, course, semesterName, onSave }) {
+export default function CourseVaultModal({ isOpen, onClose, course, semesterName: _semesterName, onSave }) {
   const [formData, setFormData] = useState({
     name: '',
     day: 'Senin',
@@ -17,25 +28,104 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
   const [activeNav, setActiveNav] = useState('course');
   const [currentFolder, setCurrentFolder] = useState(null);
   const [previewFile, setPreviewFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewError, setPreviewError] = useState('');
   const [textContent, setTextContent] = useState('');
   const [newFileName, setNewFileName] = useState('');
   const [contextMenu, setContextMenu] = useState(null);
   const [activeSubMenu, setActiveSubMenu] = useState(null);
   const [promptDialog, setPromptDialog] = useState(null);
 
+  // State untuk Integrasi OCR Text Viewer di Course Vault
+  const [previewTab, setPreviewTab] = useState('file'); // 'file' | 'ocr'
+  const [ocrRecord, setOcrRecord] = useState(null);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrLoadError, setOcrLoadError] = useState('');
+  const [ocrSearchTerm, setOcrSearchTerm] = useState('');
+  const [isEditingOcr, setIsEditingOcr] = useState(false);
+  const [ocrEditText, setOcrEditText] = useState('');
+  const [isSavingOcr, setIsSavingOcr] = useState(false);
+
   useEffect(() => {
-    if (previewFile && previewFile.fileObject) {
-      const ext = previewFile.name.split('.').pop().toLowerCase();
-      if (['txt', 'js', 'jsx', 'html', 'css', 'py', 'java', 'cpp', 'json', 'md', 'csv'].includes(ext)) {
-        const reader = new FileReader();
-        reader.onload = (e) => setTextContent(e.target.result);
-        reader.readAsText(previewFile.fileObject);
-      } else {
-        setTextContent('');
+    let disposed = false;
+    let objectUrl = '';
+    setPreviewUrl('');
+    setPreviewError('');
+    setTextContent('');
+    if (!previewFile) return undefined;
+
+    const loadPreview = async () => {
+      try {
+        let blob = null;
+        if (isBinaryFileReference(previewFile.binaryRef)) {
+          blob = await courseVaultBinaryStore.get(previewFile.binaryRef);
+        } else if (typeof previewFile.fileObject?.arrayBuffer === 'function') {
+          blob = previewFile.fileObject;
+        } else if (typeof previewFile.url === 'string' && previewFile.url.startsWith('data:')) {
+          if (!disposed) setPreviewUrl(previewFile.url);
+          return;
+        } else if (hasLegacyTransientBinary(previewFile)) {
+          if (!disposed) setPreviewError('Berkas lama memakai blob URL sementara dan tidak dapat dipulihkan setelah restart. Metadata lama tetap dipertahankan.');
+          return;
+        } else {
+          return;
+        }
+
+        objectUrl = URL.createObjectURL(blob);
+        if (disposed) {
+          URL.revokeObjectURL(objectUrl);
+          objectUrl = '';
+          return;
+        }
+        setPreviewUrl(objectUrl);
+        const ext = previewFile.name.split('.').pop().toLowerCase();
+        if (['txt', 'js', 'jsx', 'html', 'css', 'py', 'java', 'cpp', 'json', 'md', 'csv'].includes(ext)) {
+          setTextContent(await blob.text());
+        }
+      } catch {
+        if (!disposed) setPreviewError('Berkas lokal tidak tersedia atau referensinya rusak. Metadata tidak diubah.');
       }
-    } else {
-      setTextContent('');
+    };
+
+    void loadPreview();
+    return () => {
+      disposed = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [previewFile]);
+
+  useEffect(() => {
+    let active = true;
+    setPreviewTab('file');
+    setOcrRecord(null);
+    setOcrLoadError('');
+    setOcrLoading(false);
+    setOcrSearchTerm('');
+    setIsEditingOcr(false);
+    setOcrEditText('');
+    setIsSavingOcr(false);
+
+    if (!previewFile || !hasPersistentDocumentText(previewFile)) {
+      return undefined;
     }
+
+    setOcrLoading(true);
+    resolvePersistentDocumentText(previewFile, { store: courseVaultBinaryStore })
+      .then(record => {
+        if (!active) return;
+        setOcrRecord(record);
+        setOcrEditText(record?.text || '');
+        setOcrLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setOcrLoadError('Teks OCR tidak dapat dimuat dari penyimpanan lokal atau referensinya rusak.');
+        setOcrLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [previewFile]);
 
   useEffect(() => {
@@ -62,7 +152,85 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
     }
   }, [course]);
 
-  const handleContextMenu = (e) => {
+  const handleCopyOcrText = async () => {
+    const textToCopy = isEditingOcr ? ocrEditText : ocrRecord?.text;
+    if (!textToCopy) return;
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      toast.success('Teks OCR berhasil disalin ke clipboard.');
+    } catch {
+      toast.error('Gagal menyalin teks ke clipboard.');
+    }
+  };
+
+  const handleDownloadOcrTxt = () => {
+    const textToDownload = isEditingOcr ? ocrEditText : ocrRecord?.text;
+    if (!textToDownload) return;
+    try {
+      const blob = new Blob([textToDownload], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const baseName = (previewFile?.name || 'dokumen').replace(/\.[^.]+$/, '');
+      anchor.href = url;
+      anchor.download = `${baseName}-ocr.txt`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success('Teks OCR berhasil diunduh sebagai file .txt');
+    } catch {
+      toast.error('Gagal mengunduh teks OCR.');
+    }
+  };
+
+  const handleSaveOcrCorrection = async () => {
+    if (!previewFile || !ocrRecord || isSavingOcr) return;
+    setIsSavingOcr(true);
+    try {
+      const sharedCount = (formData.files || []).filter(f => f.textRef?.id === previewFile.textRef?.id).length;
+      const shouldFork = sharedCount > 1;
+
+      const updatedRef = await updatePersistentDocumentEditedText(
+        previewFile.textRef,
+        ocrEditText === ocrRecord.rawText ? null : ocrEditText,
+        { store: courseVaultBinaryStore, fork: shouldFork }
+      );
+
+      const updatedFiles = (formData.files || []).map(f => {
+        if (f.id === previewFile.id) {
+          return { ...f, textRef: updatedRef };
+        }
+        return f;
+      });
+
+      setFormData(prev => ({ ...prev, files: updatedFiles }));
+      setPreviewFile(prev => (prev ? { ...prev, textRef: updatedRef } : null));
+      setOcrRecord(prev => (prev ? {
+        ...prev,
+        id: updatedRef.id,
+        editedText: ocrEditText === prev.rawText ? null : ocrEditText,
+        text: ocrEditText,
+      } : null));
+      setIsEditingOcr(false);
+
+      if (typeof onSave === 'function') {
+        onSave({
+          id: typeof course === 'object' && course.id ? course.id : Date.now().toString(),
+          ...formData,
+          files: updatedFiles,
+        });
+      }
+
+      toast.success('Koreksi teks OCR berhasil disimpan.');
+    } catch (err) {
+      const msg = err?.code === 'quota_exceeded'
+        ? 'Penyimpanan penuh (QuotaExceededError). Koreksi teks tidak dapat disimpan.'
+        : 'Gagal menyimpan koreksi teks OCR. Teks lama tetap dipertahankan.';
+      toast.error(msg);
+    } finally {
+      setIsSavingOcr(false);
+    }
+  };
+
+  const _handleContextMenu = (e) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY });
   };
@@ -75,7 +243,7 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
     });
   };
 
-  const addDummyFile = () => {
+  const _addDummyFile = () => {
     if (!newFileName.trim()) return;
     const newFile = { id: Date.now(), name: newFileName + '.pdf', date: new Date().toLocaleDateString(), timestamp: Date.now(), starred: false, deleted: false, folderId: currentFolder ? currentFolder.id : undefined };
     setFormData(prev => ({ ...prev, files: [...prev.files, newFile] }));
@@ -99,6 +267,57 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
 
   const toggleStarFile = (fileId) => {
     setFormData(prev => ({ ...prev, files: prev.files.map(f => f.id === fileId ? { ...f, starred: !f.starred } : f) }));
+  };
+
+  const persistFiles = async (files, folderId) => {
+    const references = await courseVaultBinaryStore.putMany(Array.from(files));
+    return references.map((binaryRef, index) => ({
+      id: binaryRef.id,
+      name: binaryRef.name,
+      date: new Date().toLocaleDateString('id-ID'),
+      timestamp: Date.now() + index,
+      starred: false,
+      deleted: false,
+      folderId,
+      size: binaryRef.size,
+      mimeType: binaryRef.mimeType,
+      binaryRef,
+    }));
+  };
+
+  const showUploadError = (error) => {
+    const message = error?.code === 'file_too_large'
+      ? 'Ukuran berkas melebihi batas 25MB.'
+      : error?.code === 'mime_mismatch' || error?.code === 'unsupported_type'
+        ? 'Jenis atau MIME berkas tidak didukung.'
+        : 'Berkas gagal disimpan. Tidak ada metadata baru yang ditambahkan.';
+    toast.error(message);
+  };
+
+  const downloadFile = async (file) => {
+    let objectUrl = '';
+    try {
+      if (typeof file.url === 'string' && file.url.startsWith('data:')) {
+        const anchor = document.createElement('a');
+        anchor.href = file.url;
+        anchor.download = file.name;
+        anchor.click();
+        return;
+      }
+      let blob;
+      if (isBinaryFileReference(file.binaryRef)) blob = await courseVaultBinaryStore.get(file.binaryRef);
+      else if (typeof file.fileObject?.arrayBuffer === 'function') blob = file.fileObject;
+      else throw new Error('binary_unavailable');
+      objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = file.name;
+      anchor.click();
+    } catch {
+      toast.error('Berkas tidak dapat diunduh. Metadata lama tetap dipertahankan.');
+    } finally {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    }
   };
 
   let filteredFiles = formData.files || [];
@@ -166,8 +385,8 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
 
           {/* PDF Viewer Area */}
           <div style={{ background: '#525659', flex: 1, display: 'flex', justifyContent: 'center', overflowY: 'auto' }}>
-            {file.url ? (
-              <iframe src={file.url + "#toolbar=0"} style={{ width: '100%', height: '100%', border: 'none', minHeight: '800px' }} title={file.name} />
+            {previewUrl ? (
+              <iframe src={previewUrl + "#toolbar=0"} style={{ width: '100%', height: '100%', border: 'none', minHeight: '800px' }} title={file.name} />
             ) : (
               <div style={{ background: '#fff', width: '100%', maxWidth: '800px', minHeight: '900px', padding: '4rem 5rem', display: 'flex', flexDirection: 'column', color: '#000', fontFamily: '"Times New Roman", Times, serif', margin: '2rem 0' }}>
                 <h1 style={{ textAlign: 'center', fontSize: '1.8rem', fontWeight: 'bold', marginBottom: '2rem' }}>{file.name.replace('.pdf', '')}</h1>
@@ -231,7 +450,7 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
              <FileCode size={16} /> {file.name}
            </div>
            <div style={{ padding: '1.5rem', color: '#e2e8f0', fontFamily: 'monospace', fontSize: '0.9rem', lineHeight: '1.5', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-             {file.url ? (textContent || 'Memuat isi file...') : (
+              {previewUrl ? (textContent || 'Memuat isi file...') : (
                <>
                  <span style={{ color: '#c678dd' }}>import</span> <span style={{ color: '#e5c07b' }}>React</span> <span style={{ color: '#c678dd' }}>from</span> <span style={{ color: '#98c379' }}>'react'</span>;<br/><br/>
                  <span style={{ color: '#c678dd' }}>export default function</span> <span style={{ color: '#61afef' }}>App</span>() {'{'}<br/>
@@ -252,8 +471,8 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
     if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
       return (
         <div style={{ background: '#f8fafc', width: '100%', height: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px', borderRadius: '8px', overflow: 'hidden' }}>
-          {file.url ? (
-            <img src={file.url} alt={file.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+          {previewUrl ? (
+            <img src={previewUrl} alt={file.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
           ) : (
             <div style={{ background: '#fff', padding: '1rem', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', borderRadius: '8px' }}>
               <div style={{ width: '400px', height: '300px', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', borderRadius: '4px' }}>
@@ -432,6 +651,24 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
                     <td style={{ padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       {file.name.includes('.') ? <FileText size={18} color="#3b82f6" /> : <Folder size={18} color="#3b82f6" fill="#bfdbfe" />}
                       <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', textDecoration: file.deleted ? 'line-through' : 'none', opacity: file.deleted ? 0.6 : 1 }}>{file.name}</span>
+                      {hasPersistentDocumentText(file) && (
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            background: 'rgba(59, 130, 246, 0.12)',
+                            color: '#2563eb',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                          }}
+                          title="Teks OCR tersimpan"
+                        >
+                          <FileText size={11} /> OCR
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '0.75rem 1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{file.date}</td>
                     <td style={{ padding: '0.75rem 1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{(Math.random() * 5 + 0.1).toFixed(1)} MB</td>
@@ -524,23 +761,16 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
                 onClick={() => {
                   const input = document.createElement('input');
                   input.type = 'file';
-                  input.onchange = (e) => {
+                  input.accept = BINARY_FILE_ACCEPT.join(',');
+                  input.onchange = async (e) => {
                     if (e.target.files.length > 0) {
-                      const fileObj = e.target.files[0];
-                      const url = URL.createObjectURL(fileObj);
-                      const newFile = { 
-                        id: Date.now(), 
-                        name: fileObj.name, 
-                        date: new Date().toLocaleDateString('id-ID'), 
-                        timestamp: Date.now(), 
-                        starred: false, 
-                        deleted: false, 
-                        folderId: currentFolder ? currentFolder.id : undefined,
-                        url: url,
-                        fileObject: fileObj
-                      };
-                      setFormData(prev => ({ ...prev, files: [...prev.files, newFile] }));
-                      toast.success('File berhasil diupload');
+                      try {
+                        const [newFile] = await persistFiles(e.target.files, currentFolder ? currentFolder.id : undefined);
+                        setFormData(prev => ({ ...prev, files: [...prev.files, newFile] }));
+                        toast.success('File berhasil diupload');
+                      } catch (error) {
+                        showUploadError(error);
+                      }
                     }
                   };
                   input.click();
@@ -557,7 +787,8 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
                   const input = document.createElement('input');
                   input.type = 'file';
                   input.webkitdirectory = true;
-                  input.onchange = (e) => {
+                  input.accept = BINARY_FILE_ACCEPT.join(',');
+                  input.onchange = async (e) => {
                     if (e.target.files.length > 0) {
                       const folderPath = e.target.files[0].webkitRelativePath;
                       const rootFolderName = folderPath.split('/')[0] || 'Folder Baru';
@@ -573,20 +804,13 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
                          folderId: currentFolder ? currentFolder.id : undefined 
                       };
                       
-                      const newFiles = Array.from(e.target.files).map((fileObj, idx) => ({
-                         id: Date.now() + idx + 1,
-                         name: fileObj.name,
-                         date: new Date().toLocaleDateString('id-ID'),
-                         timestamp: Date.now() + idx + 1,
-                         starred: false,
-                         deleted: false,
-                         folderId: newFolderId,
-                         url: URL.createObjectURL(fileObj),
-                         fileObject: fileObj
-                      }));
-                      
-                      setFormData(prev => ({ ...prev, files: [...prev.files, newFolder, ...newFiles] }));
-                      toast.success(`Folder ${rootFolderName} beserta isinya berhasil diupload`);
+                      try {
+                        const newFiles = await persistFiles(e.target.files, newFolderId);
+                        setFormData(prev => ({ ...prev, files: [...prev.files, newFolder, ...newFiles] }));
+                        toast.success(`Folder ${rootFolderName} beserta isinya berhasil diupload`);
+                      } catch (error) {
+                        showUploadError(error);
+                      }
                     }
                   };
                   input.click();
@@ -603,9 +827,26 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
 
           {contextMenu.type === 'file' && (
             <>
+               {/* Buka Teks OCR (jika ada) */}
+               {hasPersistentDocumentText(contextMenu.file) && (
+                 <div
+                   onClick={() => {
+                     const target = contextMenu.file;
+                     setContextMenu(null);
+                     setPreviewFile(target);
+                     setPreviewTab('ocr');
+                   }}
+                   style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}
+                   onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                 >
+                   <FileText size={16} color="#3b82f6" /> Buka Teks OCR
+                 </div>
+               )}
+
                {/* Download */}
                <div
-                onClick={() => { toast.success('Mengunduh ' + contextMenu.file.name); setContextMenu(null); }}
+                onClick={() => { void downloadFile(contextMenu.file); setContextMenu(null); }}
                 style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}
                 onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -726,11 +967,305 @@ export default function CourseVaultModal({ isOpen, onClose, course, semesterName
 
       {previewFile && (
         <Modal isOpen={!!previewFile} onClose={() => setPreviewFile(null)} title={`Pratinjau: ${previewFile.name}`} width="1000px">
-          <div style={{ padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: '85vh', maxHeight: '900px' }}>
-            {renderPreviewContent(previewFile)}
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', padding: '0.5rem 0' }}>
+          <div style={{ padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '85vh', maxHeight: '900px' }}>
+            {/* Tab switchers: Dokumen Fisik vs Teks OCR */}
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', gap: '0.5rem', background: 'var(--card-bg)' }}>
+              <button
+                type="button"
+                onClick={() => setPreviewTab('file')}
+                style={{
+                  padding: '0.6rem 1rem',
+                  border: 'none',
+                  background: 'transparent',
+                  borderBottom: previewTab === 'file' ? '2px solid var(--primary-color)' : '2px solid transparent',
+                  color: previewTab === 'file' ? 'var(--primary-color)' : 'var(--text-muted)',
+                  fontWeight: 600,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                <Folder size={15} /> Dokumen Fisik
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewTab('ocr')}
+                style={{
+                  padding: '0.6rem 1rem',
+                  border: 'none',
+                  background: 'transparent',
+                  borderBottom: previewTab === 'ocr' ? '2px solid var(--primary-color)' : '2px solid transparent',
+                  color: previewTab === 'ocr' ? 'var(--primary-color)' : 'var(--text-muted)',
+                  fontWeight: 600,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                <FileText size={15} /> Teks OCR
+                {hasPersistentDocumentText(previewFile) ? (
+                  <span style={{ fontSize: '0.7rem', padding: '1px 5px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' }}>
+                    {ocrRecord?.editedText !== null && ocrRecord?.editedText !== undefined ? 'Diedit' : 'Tersimpan'}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '0.7rem', padding: '1px 5px', borderRadius: '4px', background: '#f1f5f9', color: '#94a3b8' }}>
+                    Kosong
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Konten Tab: Dokumen Fisik */}
+            {previewTab === 'file' && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'auto' }}>
+                {previewError ? (
+                  <div style={{ padding: '2rem', color: 'var(--danger)', background: 'var(--bg-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
+                      <AlertCircle size={18} /> Berkas Fisik Tidak Tersedia
+                    </div>
+                    <div>{previewError}</div>
+                    {hasPersistentDocumentText(previewFile) && (
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          onClick={() => setPreviewTab('ocr')}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                        >
+                          <FileText size={14} /> Buka Teks OCR yang Tersimpan
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  renderPreviewContent(previewFile)
+                )}
+              </div>
+            )}
+
+            {/* Konten Tab: Teks OCR */}
+            {previewTab === 'ocr' && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, gap: '0.5rem' }}>
+                {!hasPersistentDocumentText(previewFile) ? (
+                  <div style={{ padding: '3rem 2rem', textAlign: 'center', background: 'var(--bg-color)', borderRadius: '8px', color: 'var(--text-muted)' }}>
+                    <FileText size={48} color="#94a3b8" style={{ margin: '0 auto 1rem' }} />
+                    <h4 style={{ margin: '0 0 0.5rem', color: 'var(--text-main)' }}>Belum Ada Teks OCR Tersimpan</h4>
+                    <p style={{ margin: 0, fontSize: '0.9rem' }}>
+                      Dokumen ini belum memiliki teks hasil pemindaian OCR. Anda dapat memindai dokumen kembali melalui AI Scanner untuk mengekstrak dan menyimpan teksnya.
+                    </p>
+                  </div>
+                ) : ocrLoading ? (
+                  <div style={{ padding: '3rem 2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <Clock size={32} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 1rem' }} />
+                    <p style={{ margin: 0 }}>Memuat teks OCR dari penyimpanan lokal...</p>
+                  </div>
+                ) : ocrLoadError ? (
+                  <div style={{ padding: '2rem', color: 'var(--danger)', background: 'var(--bg-color)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <AlertCircle size={18} /> {ocrLoadError}
+                  </div>
+                ) : ocrRecord ? (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, gap: '0.5rem' }}>
+                    {/* Status & Banner jika berkas fisik hilang */}
+                    {previewError && (
+                      <div style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#dc2626', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <AlertCircle size={14} /> Berkas fisik asli tidak tersedia di penyimpanan lokal, tetapi teks OCR tetap tersimpan aman.
+                      </div>
+                    )}
+
+                    {/* Toolbar Pencarian & Aksi OCR */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', background: 'var(--bg-color)', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <span style={{
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          padding: '0.2rem 0.5rem',
+                          borderRadius: '4px',
+                          backgroundColor: (ocrRecord.editedText !== null && ocrRecord.editedText !== undefined) ? 'rgba(234, 179, 8, 0.15)' : 'rgba(34, 197, 94, 0.15)',
+                          color: (ocrRecord.editedText !== null && ocrRecord.editedText !== undefined) ? '#ca8a04' : '#16a34a',
+                        }}>
+                          {(ocrRecord.editedText !== null && ocrRecord.editedText !== undefined) ? 'Sudah Dikoreksi' : 'Hasil OCR Mesin'}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {(isEditingOcr ? ocrEditText : ocrRecord.text).length.toLocaleString('id-ID')} karakter
+                        </span>
+                        {(ocrRecord.confidence !== null && ocrRecord.confidence !== undefined) && (
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            · Keyakinan: ~{Math.round(ocrRecord.confidence)}%
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Pencarian (hanya aktif saat mode membaca) */}
+                      {!isEditingOcr && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', position: 'relative' }}>
+                          <Search size={14} style={{ color: 'var(--text-muted)', position: 'absolute', left: '8px' }} />
+                          <input
+                            type="text"
+                            placeholder="Cari kata dalam teks..."
+                            value={ocrSearchTerm}
+                            onChange={e => setOcrSearchTerm(e.target.value)}
+                            style={{
+                              padding: '0.25rem 0.5rem 0.25rem 1.75rem',
+                              fontSize: '0.8rem',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-color)',
+                              background: 'var(--card-bg)',
+                              color: 'var(--text-main)',
+                              width: '180px',
+                            }}
+                          />
+                          {ocrSearchTerm.trim() && (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              {(() => {
+                                const regex = new RegExp(ocrSearchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                                const count = (ocrRecord.text.match(regex) || []).length;
+                                return count > 0 ? `${count} ditemukan` : 'Tidak ada';
+                              })()}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Tombol Aksi */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={handleCopyOcrText}
+                          className="btn btn-outline"
+                          style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                          title="Salin teks ke clipboard"
+                        >
+                          <Copy size={13} /> Salin
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDownloadOcrTxt}
+                          className="btn btn-outline"
+                          style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                          title="Unduh teks sebagai .txt"
+                        >
+                          <Download size={13} /> Unduh .txt
+                        </button>
+
+                        {!isEditingOcr ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsEditingOcr(true);
+                              setOcrEditText(ocrRecord.text);
+                            }}
+                            className="btn btn-outline"
+                            style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                          >
+                            <Edit2 size={13} /> Edit Teks
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setOcrEditText(ocrRecord.rawText)}
+                              className="btn btn-outline"
+                              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                              title="Kembalikan ke teks mesin asli"
+                            >
+                              <RotateCcw size={13} /> Reset ke Asli
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsEditingOcr(false);
+                                setOcrEditText(ocrRecord.text);
+                              }}
+                              className="btn btn-outline"
+                              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                            >
+                              <X size={13} /> Batal
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleSaveOcrCorrection}
+                              disabled={isSavingOcr}
+                              className="btn btn-primary"
+                              style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                            >
+                              <Save size={13} /> {isSavingOcr ? 'Menyimpan...' : 'Simpan Koreksi'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Area Teks / Editor */}
+                    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                      {isEditingOcr ? (
+                        <textarea
+                          value={ocrEditText}
+                          onChange={e => setOcrEditText(e.target.value)}
+                          placeholder="Ketik koreksi teks OCR di sini..."
+                          style={{
+                            width: '100%',
+                            flex: 1,
+                            padding: '1rem',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            backgroundColor: 'var(--bg-color)',
+                            color: 'var(--text-main)',
+                            fontFamily: 'monospace',
+                            fontSize: '0.85rem',
+                            lineHeight: 1.6,
+                            resize: 'none',
+                          }}
+                        />
+                      ) : (
+                        <div style={{
+                          flex: 1,
+                          overflowY: 'auto',
+                          padding: '1rem 1.25rem',
+                          background: 'var(--bg-color)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          color: 'var(--text-main)',
+                          fontFamily: 'monospace',
+                          fontSize: '0.85rem',
+                          lineHeight: 1.6,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}>
+                          {ocrSearchTerm.trim() ? (
+                            (() => {
+                              const escaped = ocrSearchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                              const regex = new RegExp(`(${escaped})`, 'gi');
+                              const parts = ocrRecord.text.split(regex);
+                              return parts.map((part, index) => (
+                                regex.test(part) ? (
+                                  <mark key={index} style={{ backgroundColor: '#fde047', color: '#854d0e', padding: '1px 3px', borderRadius: '3px', fontWeight: 600 }}>
+                                    {part}
+                                  </mark>
+                                ) : part
+                              ));
+                            })()
+                          ) : (
+                            ocrRecord.text
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', padding: '0.5rem 0', borderTop: '1px solid var(--border-color)' }}>
               <button onClick={() => setPreviewFile(null)} className="btn btn-secondary">Tutup</button>
-              <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Download size={16} /> Download Dokumen</button>
+              {!previewError && (
+                <button onClick={() => void downloadFile(previewFile)} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Download size={16} /> Download Dokumen
+                </button>
+              )}
             </div>
           </div>
         </Modal>

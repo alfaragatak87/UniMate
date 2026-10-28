@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 import { Plus, Trash2, Edit2, FileText, ChevronDown, ChevronUp, Info, CheckCircle2, AlertCircle, Download, Sparkles, Eye, BookOpen } from 'lucide-react';
@@ -7,6 +7,8 @@ import Modal from '../components/Modal';
 import CourseVaultModal from '../components/CourseVaultModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import html2pdf from 'html2pdf.js';
+import { createKHSElement } from '../utils/khsDocument';
+import { resolvePersistentDocument } from '../services/persistentDocument';
 export default function Semesters() {
   const { semesters, setSemesters } = useAppContext();
 
@@ -16,15 +18,63 @@ export default function Semesters() {
   const [isCourseVaultOpen, setIsCourseVaultOpen] = useState(false);
   const [selectedSemesterId, setSelectedSemesterId] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
+  const [previewMimeType, setPreviewMimeType] = useState('');
   const [previewTitle, setPreviewTitle] = useState('Dokumen Asli');
+  const previewReleaseRef = useRef(null);
   const [selectedDocIndex, setSelectedDocIndex] = useState({});
   const [expandedSemesters, setExpandedSemesters] = useState({});
   const [isLoading, setIsLoading] = useState(true);
+
+  // Confirm dialog state — replaces window.confirm (incompatible with Electron frameless)
+  const [confirmDeleteSem, setConfirmDeleteSem] = useState(null); // semester id to delete
+  const [confirmDeleteDoc, setConfirmDeleteDoc] = useState(null); // { semesterId, docIndex }
+  // Rename document modal state — replaces window.prompt
+  const [renameDoc, setRenameDoc] = useState(null); // { semesterId, docIndex, currentName }
+  const [renameDocValue, setRenameDocValue] = useState('');
 
   useEffect(() => {
     const timer = setTimeout(() => setIsLoading(false), 600);
     return () => clearTimeout(timer);
   }, []);
+
+  const closeDocumentPreview = () => {
+    previewReleaseRef.current?.();
+    previewReleaseRef.current = null;
+    setPreviewImage(null);
+    setPreviewMimeType('');
+    setPreviewTitle('Dokumen Asli');
+  };
+
+  useEffect(() => () => previewReleaseRef.current?.(), []);
+
+  const openDocumentPreview = async (document) => {
+    try {
+      const resolved = await resolvePersistentDocument(document);
+      closeDocumentPreview();
+      previewReleaseRef.current = resolved.release;
+      setPreviewTitle(document.type || 'Dokumen Asli');
+      setPreviewMimeType(resolved.mimeType);
+      setPreviewImage(resolved.url);
+    } catch {
+      toast.error('Dokumen tidak tersedia atau referensinya rusak. Data lama tidak diubah.');
+    }
+  };
+
+  const downloadDocument = async (documentEntry) => {
+    let resolved;
+    try {
+      resolved = await resolvePersistentDocument(documentEntry);
+      const anchor = document.createElement('a');
+      const fallbackExtension = resolved.mimeType === 'application/pdf' ? 'pdf' : 'jpg';
+      anchor.href = resolved.url;
+      anchor.download = resolved.name || `${(documentEntry.type || 'Dokumen').replace(/\s+/g, '_')}.${fallbackExtension}`;
+      anchor.click();
+    } catch {
+      toast.error('Dokumen tidak dapat diunduh. Metadata tetap dipertahankan.');
+    } finally {
+      resolved?.release();
+    }
+  };
   
   // Auto-fill Semesters 1-8 if they don't exist
   useEffect(() => {
@@ -209,10 +259,13 @@ export default function Semesters() {
   };
 
   const handleDelete = (id) => {
-    if (window.confirm('Yakin ingin menghapus semester ini?')) {
-      setSemesters(prev => prev.filter(s => s.id !== id));
-      toast.success('Semester dihapus!');
-    }
+    setConfirmDeleteSem(id);
+  };
+
+  const doDeleteSem = () => {
+    setSemesters(prev => prev.filter(s => s.id !== confirmDeleteSem));
+    toast.success('Semester dihapus!');
+    setConfirmDeleteSem(null);
   };
 
   const handleOpenCourseVault = (course, semesterId) => {
@@ -240,81 +293,7 @@ export default function Semesters() {
   const navigate = useNavigate();
 
   const generateKHSElement = (semester) => {
-    const div = document.createElement('div');
-    div.style.padding = '30px';
-    div.style.fontFamily = 'Arial, sans-serif';
-    div.style.color = '#333';
-    div.style.width = '700px'; // Fit within A4 at 96 DPI (8.27 - 1 inch margin = 7.27 inches = 698px)
-    div.style.maxWidth = '100%';
-    div.style.backgroundColor = '#fff';
-    
-    const header = document.createElement('div');
-    header.style.textAlign = 'center';
-    header.style.borderBottom = '2px solid #333';
-    header.style.paddingBottom = '20px';
-    header.style.marginBottom = '30px';
-    header.innerHTML = `
-      <h1 style="margin: 0; font-size: 24px; text-transform: uppercase;">Kartu Hasil Studi (KHS)</h1>
-      <h2 style="margin: 10px 0 0 0; font-size: 18px; color: #555;">${semester.name}</h2>
-    `;
-    div.appendChild(header);
-    
-    const table = document.createElement('table');
-    table.style.width = '100%';
-    table.style.borderCollapse = 'collapse';
-    table.style.marginBottom = '30px';
-    table.innerHTML = `
-      <thead>
-        <tr style="background-color: #f3f4f6;">
-          <th style="border: 1px solid #ccc; padding: 12px 8px; text-align: left;">No</th>
-          <th style="border: 1px solid #ccc; padding: 12px 8px; text-align: left;">Mata Kuliah</th>
-          <th style="border: 1px solid #ccc; padding: 12px 8px; text-align: center;">SKS</th>
-          <th style="border: 1px solid #ccc; padding: 12px 8px; text-align: center;">Nilai</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${(semester.courses || []).map((course, i) => {
-          const courseName = typeof course === 'string' ? course : (course.name || '');
-          let cleanName = courseName;
-          let grade = typeof course === 'object' && course.grade ? course.grade : null;
-          let sks = typeof course === 'object' && course.sks ? course.sks : '-';
-
-          const gradeMatch = courseName.match(/(.*?)\s*\(Nilai:\s*([^)]+)\)/i);
-          if (gradeMatch) {
-            cleanName = gradeMatch[1].trim();
-            if (!grade) grade = gradeMatch[2].trim().toUpperCase();
-          }
-
-          return `
-          <tr>
-            <td style="border: 1px solid #ccc; padding: 10px 8px;">${i + 1}</td>
-            <td style="border: 1px solid #ccc; padding: 10px 8px;">${cleanName}</td>
-            <td style="border: 1px solid #ccc; padding: 10px 8px; text-align: center;">${sks}</td>
-            <td style="border: 1px solid #ccc; padding: 10px 8px; text-align: center; font-weight: bold;">${grade || '-'}</td>
-          </tr>
-          `;
-        }).join('')}
-      </tbody>
-    `;
-    div.appendChild(table);
-    
-    const totalSKS = (semester.courses || []).reduce((acc, course) => {
-       const sksStr = typeof course === 'object' && course.sks ? course.sks : '0';
-       const sks = parseInt(sksStr);
-       return acc + (isNaN(sks) ? 0 : sks);
-    }, 0);
-    const summary = document.createElement('div');
-    summary.style.display = 'flex';
-    summary.style.justifyContent = 'flex-end';
-    summary.innerHTML = `
-      <div style="border: 1px solid #ccc; padding: 15px 25px; border-radius: 8px; background-color: #f9fafb;">
-        <div style="margin-bottom: 8px;"><strong>Total SKS:</strong> ${totalSKS}</div>
-        <div style="font-size: 18px;"><strong>Indeks Prestasi Semester (IPS):</strong> <span style="color: #166534;">${semester.gpa || '-'}</span></div>
-      </div>
-    `;
-    div.appendChild(summary);
-    
-    return div;
+    return createKHSElement(semester);
   };
 
   const handleExportPDF = (semester, isPreview = false) => {
@@ -358,25 +337,35 @@ export default function Semesters() {
     if (rawDocs.length === 0 && sem.originalFile) rawDocs = [{ type: sem.documentType || 'Dokumen Semester', file: sem.originalFile }];
     const doc = rawDocs[docIndex];
     if (!doc) return;
-    const newName = window.prompt('Masukkan nama jenis dokumen baru (misal: KRS, KRU UTS, KRU UAS, KHS):', doc.type);
-    if (newName && newName.trim() !== '') {
-      const updatedSemesters = semesters.map(s => {
-        if (s.id === semesterId) {
-          const updatedDocs = [...rawDocs];
-          updatedDocs[docIndex] = { ...doc, type: newName.trim() };
-          return { ...s, documents: updatedDocs };
-        }
-        return s;
-      });
-      setSemesters(updatedSemesters);
-      toast.success('Nama dokumen diperbarui');
-    }
+    setRenameDocValue(doc.type || '');
+    setRenameDoc({ semesterId, docIndex, rawDocs });
+  };
+
+  const doRenameDocument = () => {
+    if (!renameDoc || !renameDocValue.trim()) return;
+    const { semesterId, docIndex, rawDocs } = renameDoc;
+    const doc = rawDocs[docIndex];
+    const updatedSemesters = semesters.map(s => {
+      if (s.id === semesterId) {
+        const updatedDocs = [...rawDocs];
+        updatedDocs[docIndex] = { ...doc, type: renameDocValue.trim() };
+        return { ...s, documents: updatedDocs };
+      }
+      return s;
+    });
+    setSemesters(updatedSemesters);
+    toast.success('Nama dokumen diperbarui');
+    setRenameDoc(null);
   };
 
   const handleDeleteDocument = (semesterId, docIndex) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus dokumen ini?')) return;
+    setConfirmDeleteDoc({ semesterId, docIndex });
+  };
+
+  const doDeleteDocument = () => {
+    const { semesterId, docIndex } = confirmDeleteDoc;
     const sem = semesters.find(s => s.id === semesterId);
-    if (!sem) return;
+    if (!sem) { setConfirmDeleteDoc(null); return; }
     let rawDocs = sem.documents || [];
     if (rawDocs.length === 0 && sem.originalFile) rawDocs = [{ type: sem.documentType || 'Dokumen Semester', file: sem.originalFile }];
     const updatedSemesters = semesters.map(s => {
@@ -393,18 +382,27 @@ export default function Semesters() {
     setSemesters(updatedSemesters);
     setSelectedDocIndex(prev => ({ ...prev, [semesterId]: 0 }));
     toast.success('Dokumen dihapus');
+    setConfirmDeleteDoc(null);
   };
 
-  const handleReplaceFile = (e, semesterId, docIndex) => {
+  const handleReplaceFile = (e, semesterId, target) => {
     const file = e.target.files[0];
     if (!file) return;
     
     const sem = semesters.find(s => s.id === semesterId);
     if (!sem) return;
-    let rawDocs = sem.documents || [];
-    if (rawDocs.length === 0 && sem.originalFile) rawDocs = [{ type: sem.documentType || 'Dokumen Semester', file: sem.originalFile }];
-    const doc = rawDocs[docIndex];
-    if (!doc) return;
+    let replaceDoc;
+    if (target?.mode === 'create' && typeof target.documentType === 'string' && target.documentType.trim()) {
+      replaceDoc = { mode: 'create', semesterId, documentType: target.documentType.trim() };
+    } else if (target?.mode === 'replace' && Number.isSafeInteger(target.docIndex) && target.docIndex >= 0) {
+      let rawDocs = sem.documents || [];
+      if (rawDocs.length === 0 && sem.originalFile) rawDocs = [{ type: sem.documentType || 'Dokumen Semester', file: sem.originalFile }];
+      const doc = rawDocs[target.docIndex];
+      if (!doc) return;
+      replaceDoc = { mode: 'replace', semesterId, docIndex: target.docIndex, oldType: doc.type };
+    } else {
+      return;
+    }
 
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -413,7 +411,7 @@ export default function Semesters() {
         state: { 
           prefillImage: reader.result, 
           autoScan: true,
-          replaceDoc: { semesterId, docIndex, oldType: doc.type }
+          replaceDoc
         } 
       });
     };
@@ -760,23 +758,23 @@ export default function Semesters() {
                               <div style={{ display: 'flex' }}>
                                 <label className="btn-icon" title={`Upload ${activeDoc.type}`} style={{ cursor: 'pointer', padding: '8px 16px', background: 'var(--primary-color)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '8px', fontWeight: 600, fontSize: '0.85rem', boxShadow: '0 2px 6px rgba(59, 130, 246, 0.4)' }}>
                                   <Plus size={16} /> Upload
-                                  <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={(e) => handleReplaceFile(e, sem.id, 999)} />
+                                  <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={(e) => handleReplaceFile(e, sem.id, { mode: 'create', documentType: activeDoc.type })} />
                                 </label>
                               </div>
                             ) : (
                             <div style={{ display: 'flex', gap: '0.5rem' }}>
-                              <button className="btn-icon" onClick={() => { setPreviewTitle(activeDoc.type || 'Dokumen Asli'); setPreviewImage(activeDoc.file); }} title="Lihat Dokumen" style={{ width: '36px', height: '36px', padding: '0', background: 'var(--bg-color)', color: 'var(--primary-color)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                              <button className="btn-icon" onClick={() => void openDocumentPreview(activeDoc)} title="Lihat Dokumen" style={{ width: '36px', height: '36px', padding: '0', background: 'var(--bg-color)', color: 'var(--primary-color)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
                                 <Eye size={16} />
                               </button>
-                              <a href={activeDoc.file} download={activeDoc.file.startsWith('data:application/pdf') ? `${(activeDoc.type||'Dokumen').replace(/\s+/g, '_')}.pdf` : `${(activeDoc.type||'Dokumen').replace(/\s+/g, '_')}.jpg`} className="btn-icon" title="Download Dokumen" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: '0', background: 'var(--bg-color)', color: 'var(--primary-color)', border: '1px solid var(--border-color)', textDecoration: 'none', borderRadius: '8px' }}>
+                              <button onClick={() => void downloadDocument(activeDoc)} className="btn-icon" title="Download Dokumen" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: '0', background: 'var(--bg-color)', color: 'var(--primary-color)', border: '1px solid var(--border-color)', textDecoration: 'none', borderRadius: '8px' }}>
                                 <Download size={16} />
-                              </a>
+                              </button>
                               <button className="btn-icon" onClick={() => handleRenameDocument(sem.id, activeDoc.rawIndex)} title="Ganti Nama Dokumen" style={{ width: '36px', height: '36px', padding: '0', background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
                                 <Edit2 size={16} />
                               </button>
                               <label className="btn-icon" title="Ganti File (Scan Ulang)" style={{ cursor: 'pointer', width: '36px', height: '36px', padding: '0', background: '#eff6ff', color: '#3b82f6', border: '1px solid #dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px' }}>
                                 <Sparkles size={16} />
-                                <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={(e) => handleReplaceFile(e, sem.id, activeDoc.rawIndex)} />
+                                <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={(e) => handleReplaceFile(e, sem.id, { mode: 'replace', docIndex: activeDoc.rawIndex })} />
                               </label>
                               <button className="btn-icon" onClick={() => handleDeleteDocument(sem.id, activeDoc.rawIndex)} title="Hapus Dokumen" style={{ width: '36px', height: '36px', padding: '0', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '8px' }}>
                                 <Trash2 size={16} />
@@ -1025,24 +1023,68 @@ export default function Semesters() {
           onCancel={() => setShowKruPopup(false)}
         />
 
-      <Modal isOpen={!!previewImage} onClose={() => { setPreviewImage(null); setPreviewTitle('Dokumen Asli'); }} title={previewTitle} width="800px">
+      <ConfirmDialog
+        isOpen={!!confirmDeleteSem}
+        title="Hapus Semester"
+        message="Yakin ingin menghapus semester ini? Semua data mata kuliah dan dokumen di semester ini akan ikut terhapus."
+        confirmText="Ya, Hapus"
+        cancelText="Batal"
+        confirmColor="#ef4444"
+        onConfirm={doDeleteSem}
+        onCancel={() => setConfirmDeleteSem(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={!!confirmDeleteDoc}
+        title="Hapus Dokumen"
+        message="Apakah Anda yakin ingin menghapus dokumen ini? Tindakan ini tidak bisa dibatalkan."
+        confirmText="Ya, Hapus"
+        cancelText="Batal"
+        confirmColor="#ef4444"
+        onConfirm={doDeleteDocument}
+        onCancel={() => setConfirmDeleteDoc(null)}
+      />
+
+      <Modal isOpen={!!previewImage} onClose={closeDocumentPreview} title={previewTitle} width="800px">
         <div style={{ textAlign: 'center', height: '70vh', display: 'flex', flexDirection: 'column' }}>
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            {previewImage && previewImage.startsWith('data:application/pdf') ? (
+            {previewMimeType === 'application/pdf' ? (
               <iframe src={previewImage} width="100%" height="100%" style={{ border: '1px solid var(--border-color)', borderRadius: '12px' }} title="PDF Preview" />
             ) : (
               <img src={previewImage} alt="KHS Asli" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }} />
             )}
           </div>
           <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'center', gap: '1rem' }}>
-            <button className="btn btn-outline" onClick={() => { setPreviewImage(null); setPreviewTitle('Dokumen Asli'); }}>Tutup</button>
-            <a href={previewImage} download={previewImage && previewImage.startsWith('data:application/pdf') ? `${previewTitle.replace(/\s+/g, '_')}.pdf` : `${previewTitle.replace(/\s+/g, '_')}.jpg`} className="btn btn-primary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-              Download Dokumen
+            <button className="btn btn-outline" onClick={closeDocumentPreview}>Tutup</button>
+            <a href={previewImage} download={`${previewTitle.replace(/\s+/g, '_')}.${previewMimeType === 'application/pdf' ? 'pdf' : 'jpg'}`} className="btn btn-primary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Download size={16} /> Download Dokumen
             </a>
           </div>
         </div>
       </Modal>
+
+      {/* Rename Document Modal — replaces window.prompt */}
+      {renameDoc && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
+          <div style={{ backgroundColor: 'var(--card-bg)', borderRadius: '16px', padding: '1.5rem', width: '100%', maxWidth: '420px', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-main)' }}>Ganti Nama Dokumen</h3>
+            <p style={{ margin: '0 0 1.25rem 0', fontSize: '0.875rem', color: 'var(--text-muted)' }}>Contoh: KRS, KRU UTS, KRU UAS, KHS, Jadwal Mingguan</p>
+            <input
+              type="text"
+              className="form-input"
+              value={renameDocValue}
+              onChange={e => setRenameDocValue(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') doRenameDocument(); if (e.key === 'Escape') setRenameDoc(null); }}
+              autoFocus
+              style={{ marginBottom: '1.25rem' }}
+            />
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button onClick={() => setRenameDoc(null)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-color)', color: 'var(--text-main)', fontWeight: 600, cursor: 'pointer' }}>Batal</button>
+              <button onClick={doRenameDocument} disabled={!renameDocValue.trim()} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', backgroundColor: 'var(--primary-color)', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -22,5 +22,8 @@ release
 *.suo
 *.ntvs*
 *.njsproj
-*.sln
-*.sw?
+# Scratch and Release Candidates
+scratch/
+release-candidate*/
+credentials/
+

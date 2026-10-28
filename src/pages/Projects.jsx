@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Briefcase, FolderKanban, Plus, GitBranch, HardDrive, Terminal, X, Save, Edit3, Trash2, ExternalLink, Download, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 export default function Projects() {
   const { projects, setProjects, githubUser } = useAppContext();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const [showGithubModal, setShowGithubModal] = useState(false);
   const [githubRepos, setGithubRepos] = useState([]);
@@ -97,10 +99,13 @@ export default function Projects() {
   };
 
   const handleDelete = (id) => {
-    if (window.confirm('Yakin ingin menghapus proyek ini?')) {
-      setProjects(prev => prev.filter(p => p.id !== id));
-      toast.success('Proyek dihapus');
-    }
+    setConfirmDeleteId(id);
+  };
+
+  const doDelete = () => {
+    setProjects(prev => prev.filter(p => p.id !== confirmDeleteId));
+    toast.success('Proyek dihapus');
+    setConfirmDeleteId(null);
   };
 
   const getStatusColor = (status) => {
@@ -383,6 +388,17 @@ export default function Projects() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={!!confirmDeleteId}
+        title="Hapus Proyek"
+        message="Yakin ingin menghapus proyek ini? Semua data proyek akan hilang permanen."
+        confirmText="Ya, Hapus"
+        cancelText="Batal"
+        confirmColor="#ef4444"
+        onConfirm={doDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }
