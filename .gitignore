@@ -27,3 +27,9 @@ scratch/
 release-candidate*/
 credentials/
 
+# Claude Code / ECC (local install) — ignore all except the karpathy-guidelines skill
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/karpathy-guidelines/
+
