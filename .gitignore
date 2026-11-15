@@ -33,3 +33,6 @@ credentials/
 .claude/skills/*
 !.claude/skills/karpathy-guidelines/
 
+# Archify diagram output
+.archify/
+
